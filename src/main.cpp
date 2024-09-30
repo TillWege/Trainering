@@ -4,40 +4,133 @@
 #include <iostream>
 #include <filesystem>
 #include "rlImGuiColors.h"
+#include "raymath.h"
 
 #define TRAIN_MODELS "models/trains"
-#define FLOOR_MODEL "models/terrain/open.obj"
+#define FLOOR_PLACEHOLDER "models/terrain/open.obj"
+
+#define MARS_FLOORS "models/terrain/mars"
+#define FORREST_FLOORS "models/terrain/forrest"
+#define CITY_FLOORS "models/terrain/city"
 
 #define screenWidth 1280
 #define screenHeight 720
 
 void setup()
 {
-	SetWindowState(FLAG_VSYNC_HINT);
+	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
 	InitWindow(screenWidth, screenHeight, "Trainering");
 	rlImGuiSetup(true);
 }
 
-enum Debug_Menu
+
+
+struct Tile
 {
-	DM_MODEL_PREVIEW,
-	DM_TRAIN_ASSEMBLY,
+	Vector2 position;
+
+	int floorTileIndex;
+	int contentIndex;
 };
+
+
+std::vector<Model> mars_floors;
+std::vector<Model> forrest_floors;
+std::vector<Model> city_floors;
+Model placeholder_floor;
+
+void loadFloors()
+{
+	placeholder_floor = LoadModel(FLOOR_PLACEHOLDER);
+
+	for (const auto& entry : std::filesystem::directory_iterator(MARS_FLOORS)) {
+		std::string path = entry.path().string();
+		std::string fileName = entry.path().filename().string();
+		if (IsFileExtension(fileName.c_str(), ".obj")) {
+			Model model = LoadModel(path.c_str());
+			mars_floors.push_back(model);
+		}
+	}
+
+	for (const auto& entry : std::filesystem::directory_iterator(FORREST_FLOORS)) {
+		std::string path = entry.path().string();
+		std::string fileName = entry.path().filename().string();
+		if (IsFileExtension(fileName.c_str(), ".obj")) {
+			Model model = LoadModel(path.c_str());
+			forrest_floors.push_back(model);
+		}
+	}
+
+	for (const auto& entry : std::filesystem::directory_iterator(CITY_FLOORS)) {
+		std::string path = entry.path().string();
+		std::string fileName = entry.path().filename().string();
+		if (IsFileExtension(fileName.c_str(), ".obj")) {
+			Model model = LoadModel(path.c_str());
+			city_floors.push_back(model);
+		}
+	}
+}
+
+struct part
+{
+	int modelIndex;
+	Vector3 offset;
+};
+
+std::vector<part> parts;
+
+enum GAME_STATE
+{
+	MODEL_PREVIEW,
+	TRAIN_ASSEMBLY,
+};
+
+enum BIOME
+{
+	PLACEHOLDER,
+	MARS,
+	FORREST,
+	CITY
+};
+
+struct gamestate
+{
+	GAME_STATE mode = MODEL_PREVIEW;
+	bool cameraPaused = false;
+
+	int modelIndex = 0;
+	Vector3 modelPosition = { 0.0f, 0.0f, 0.0f };
+
+	int floor_dim = 10;
+
+	BIOME biome = PLACEHOLDER;
+};
+
+gamestate state;
 
 
 int main()
 {
 	setup();
 
-	Camera camera = { 0 };
-	camera.position = Vector3 { 10.0f, 10.0f, 10.0f };
-	camera.target = Vector3{ 0.0f, 0.0f, 0.0f };
-	camera.up = Vector3{ 0.0f, 1.0f, 0.0f };
-	camera.fovy = 45.0f;
-	camera.projection = CAMERA_PERSPECTIVE;
+	Camera gameCamera = { 0 };
+	gameCamera.position = Vector3 { 10.0f, 20.0f, 10.0f };
+	gameCamera.target = Vector3{ 0.0f, 0.0f, 0.0f };
+	gameCamera.up = Vector3{ 0.0f, 1.0f, 0.0f };
+	gameCamera.fovy = 45.0f;
+	gameCamera.projection = CAMERA_PERSPECTIVE;
+
+	Camera previewCamera = { 0 };
+	previewCamera.position = Vector3{ -5.0f, 5.0f, 0.0f };
+	previewCamera.target = Vector3{ 0.0f, 0.0f, 0.0f };
+	previewCamera.up = Vector3{ 0.0f, 1.0f, 0.0f };
+	previewCamera.fovy = 45.0f;
+	previewCamera.projection = CAMERA_PERSPECTIVE;
 
 	std::vector<Model> models;
 	std::vector<std::string> modelNames;
+
+	loadFloors();
 
 	for (const auto& entry : std::filesystem::directory_iterator(TRAIN_MODELS)) {
 		std::string path = entry.path().string();
@@ -49,50 +142,51 @@ int main()
 		}
 	}
 
-	Model floor = LoadModel(FLOOR_MODEL);
+	RenderTexture texturePreview = LoadRenderTexture(300, 300);
 
-	int modelIndex = 0;
-
-	Vector3 modelPosition = { 0.0f, 0.0f, 0.0f };
-
-	auto& io = ImGui::GetIO();
-
+	bool camera_paused = false;
 
 	while (!WindowShouldClose())
 	{
-		static bool cbOpen = false;
-		static int menu = 0;
-
-		struct part
-		{
-			int modelIndex;
-			Vector3 offset;
-		};
-
-		static std::vector<part> parts;
-
-		static bool camera_paused = false;
-
 		if (!camera_paused)
-			UpdateCamera(&camera, CAMERA_ORBITAL);
+			UpdateCamera(&gameCamera, CAMERA_ORBITAL);
+
+		static float scale = 1.0;
+		static int floor_idx = 0;
+
+		static ImColor color = ImColor(255, 255, 255, 255);
+
+		BeginTextureMode(texturePreview);
+		ClearBackground({ 0, 0, 0, 0 });
+
+		BeginMode3D(previewCamera);
+
+		static float rot = 0;
+		rot += 1.0f;
+
+		DrawModelEx(models.at(state.modelIndex),
+			{ 0.0f, 0.0f, 0.0f },
+			{ 0.0f, 1.0f, 0.0f },
+			rot,
+			{ 1.0f, 1.0f, 1.0f },
+			WHITE
+		);
+
+		EndMode3D();
+		EndTextureMode();
 
 		BeginDrawing();
 
-		rlImGuiBegin();
-
 		ClearBackground(RAYWHITE);
 
-		BeginMode3D(camera);
+		ClearBackground(RAYWHITE);
+		BeginMode3D(gameCamera);
 
-		ImGui::Begin("Camera Controls");
-		ImGui::Checkbox("Pause Camera", &camera_paused);
-		ImGui::End();
-
-		if(menu == DM_MODEL_PREVIEW)
+		if(state.mode == MODEL_PREVIEW)
 		{
-			DrawModel(models.at(modelIndex), modelPosition, 1.0f, WHITE);
+			DrawModel(models.at(state.modelIndex), state.modelPosition, 1.0f, WHITE);
 		}
-		else if (menu == DM_TRAIN_ASSEMBLY)
+		else if (state.mode == TRAIN_ASSEMBLY)
 		{
 			for (auto & part : parts)
 			{
@@ -101,29 +195,45 @@ int main()
 		}
 
 		DrawGrid(20, 1.0f);
-		static float scale = 1.0;
-		static int dim = 1;
 
-		static ImColor color = ImColor(255, 255, 255, 255);
+		auto ray = GetMouseRay(GetMousePosition(), gameCamera);
 
-		auto ray = GetMouseRay(GetMousePosition(), camera);
-		for (int x = -dim+1; x < dim; x++)
+		auto pY = ray.position.y;
+		auto dY = ray.direction.y;
+
+		float t = -pY / dY;
+
+		Vector3 hit = Vector3Add(ray.position, Vector3Scale(ray.direction, t));
+
+		int idx = (int)std::round(hit.x);
+		int idy = (int)std::round(hit.z);
+
+		for (int x = -state.floor_dim+1; x < state.floor_dim; x++)
 		{
-			for (int y = -dim +1; y < dim; y++)
+			for (int y = -state.floor_dim +1; y < state.floor_dim; y++)
 			{
-				Vector3 pos = { (float)x, 0.0f, (float)y };
-				Vector3 min = { pos.x - 0.5f, pos.y, pos.z - 0.5f };
-				Vector3 max = { pos.x + 0.5f, pos.y + 1.0f, pos.z + 0.5f };
+				Model* floor;
+				switch(state.biome)
+				{
+				case PLACEHOLDER:
+					floor = &placeholder_floor;
+					break;
+				case MARS:
+					floor = &mars_floors.at(floor_idx);
+					break;
+				case FORREST:
+					floor = &forrest_floors.at(floor_idx);
+					break;
+				case CITY:
+					floor = &city_floors.at(floor_idx);
+					break;
+				}
 
-				BoundingBox box = { min, max };
 
-				auto rc = GetRayCollisionBox(ray, box);
-
-				if(rc.hit)
-					DrawModel(floor, { (float)x, 0.0f, (float)y }, scale, BLUE);
+				if(x == idx && y == idy)
+					DrawModel(*floor, { (float)x, 0.0f, (float)y }, scale, BLUE);
 				else
-					DrawModel(floor, { (float)x, 0.0f, (float)y }, scale, rlImGuiColors::Convert(color));
-
+					DrawModel(*floor, { (float)x, 0.0f, (float)y }, scale, rlImGuiColors::Convert(color));
 			}
 		}
 
@@ -134,56 +244,69 @@ int main()
 
 		EndMode3D();
 
+		DrawText("TESTING", 10, 10, 20, RED);
+
+		rlImGuiBegin();
+
+		ImGui::Begin("Camera Controls");
+		ImGui::Checkbox("Pause Camera", &camera_paused);
+		ImGui::End();
+
 		ImGui::Begin("Floor Controls");
 		ImGui::DragFloat("Scale", &scale, 0.1f);
 		ImGui::ColorEdit4("Color", (float*)&color);
-		ImGui::DragInt("Dim", &dim, 1, 1, 10);
+		ImGui::DragInt("Dim", &state.floor_dim, 1, 1, 10);
 
 		ImGui::Separator();
+
 		ImGui::Text("Debug Cube");
 		ImGui::DragInt("X", &debugCubeX, 1, -10, 10);
 		ImGui::DragInt("Y", &debugCubeY, 1, -10, 10);
+
+		ImGui::Separator();
+		ImGui::Text("Mouse Hit");
+		ImGui::Text("X: %d", idx);
+		ImGui::Text("Y: %d", idy);
+
 		ImGui::End();
 
 		ImGui::Begin("Debug Menu");
 
-		if (ImGui::RadioButton("Model Preview", menu == DM_MODEL_PREVIEW)) { menu = DM_MODEL_PREVIEW; } ImGui::SameLine();
-		if (ImGui::RadioButton("Train Assembly", menu == DM_TRAIN_ASSEMBLY)) { menu = DM_TRAIN_ASSEMBLY; }
+		if (ImGui::RadioButton("Model Preview", state.mode == MODEL_PREVIEW)) { state.mode = MODEL_PREVIEW; } ImGui::SameLine();
+		if (ImGui::RadioButton("Train Assembly", state.mode == TRAIN_ASSEMBLY)) { state.mode = TRAIN_ASSEMBLY; }
 
 
-		if (menu == DM_MODEL_PREVIEW)
+		if (state.mode == MODEL_PREVIEW)
 		{
 			ImGui::Text("Model Preview");
 			ImGui::Text("Pick Model");
 
-			const char* combo_preview_value = modelNames.at(modelIndex).c_str();
+			const char* combo_preview_value = modelNames.at(state.modelIndex).c_str();
 			if (ImGui::BeginCombo("Select Model", combo_preview_value))
 			{
-				cbOpen = true;
 				for (int n = 0; n < models.size(); n++)
 				{
-					const bool is_selected = (modelIndex == n);
+					const bool is_selected = (state.modelIndex == n);
 					if (ImGui::Selectable(modelNames.at(n).c_str(), is_selected))
-						modelIndex = n;
+						state.modelIndex = n;
 
 					if (is_selected)
 						ImGui::SetItemDefaultFocus();
 				}
 				ImGui::EndCombo();
 			}
-			else
-			{
-				cbOpen = false;
-			}
+
+			Rectangle viewRect = { 0, 0, 300, -300 };
+			rlImGuiImageRect(&texturePreview.texture, (int)300, (int)300, viewRect);
 		}
-		else if (menu == DM_TRAIN_ASSEMBLY)
+		else if (state.mode == TRAIN_ASSEMBLY)
 		{
 			ImGui::Text("Train Assembly");
 
 
 			if (ImGui::Button("Add Part"))
 			{
-				part p;
+				part p = { 0 };
 				p.modelIndex = 0;
 				p.offset = { 0.0f, 0.0f, 0.0f };
 				parts.push_back(p);
@@ -215,7 +338,38 @@ int main()
 
 		ImGui::End();
 
+		ImGui::Begin("Floor Control");
+
+		ImGui::Text("Biome");
+
+		static int max_idx = 10;
+
+		if (ImGui::RadioButton("Placeholder", state.biome == PLACEHOLDER)) {
+			state.biome = PLACEHOLDER;
+		} ImGui::SameLine();
+
+		if (ImGui::RadioButton("Mars", state.biome == MARS)) {
+			state.biome = MARS;
+			max_idx = (int)mars_floors.size();
+		} ImGui::SameLine();
+
+		if (ImGui::RadioButton("Forrest", state.biome == FORREST)) {
+			state.biome = FORREST;
+			max_idx = (int)forrest_floors.size();
+		} ImGui::SameLine();
+
+		if (ImGui::RadioButton("City", state.biome == CITY)) {
+			state.biome = CITY;
+			max_idx = (int)city_floors.size();
+		}
+
+		ImGui::DragInt("Floor Index", &floor_idx, 1, 0, max_idx - 1);
+
+
+		ImGui::End();
+
 		rlImGuiEnd();
+
 		EndDrawing();
 	}
 	rlImGuiShutdown();
